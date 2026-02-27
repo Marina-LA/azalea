@@ -823,7 +823,7 @@ impl GamePacketHandler<'_> {
                                 world.query::<(&mut Physics, &mut LookDirection, &mut Position)>();
                             let Ok((mut physics, mut look_direction, mut position)) =
                                 query.get_mut(world, entity_id) else {
-                                warn!("Entity {:?} doesn't have required Physics, LookDirection, or Position components", entity_id);
+                                debug!("Entity {:?} is indexed but missing Physics/LookDirection/Position components (likely mid-server-transfer), skipping teleport", entity_id);
                                 return;
                             };
                             let old_position = *position;
