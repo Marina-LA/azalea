@@ -824,8 +824,11 @@ impl GamePacketHandler<'_> {
                         entity.world_scope(move |world| {
                             let mut query =
                                 world.query::<(&mut Physics, &mut LookDirection, &mut Position)>();
-                            let (mut physics, mut look_direction, mut position) =
-                                query.get_mut(world, entity_id).unwrap();
+                            let Ok((mut physics, mut look_direction, mut position)) =
+                                query.get_mut(world, entity_id) else {
+                                debug!("Entity {:?} is indexed but missing Physics/LookDirection/Position components (likely mid-server-transfer), skipping teleport", entity_id);
+                                return;
+                            };
                             let old_position = *position;
                             relative.apply(
                                 &change,
