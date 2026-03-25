@@ -1,6 +1,6 @@
 //! Commands for debugging and getting the current state of the bot.
 
-use std::{env, fs::File, io::Write, thread, time::Duration};
+use std::{any::Any, env, fs::File, io::Write, thread, time::Duration};
 
 use azalea::{
     BlockPos,
@@ -16,7 +16,7 @@ use azalea::{
 use azalea_core::hit_result::HitResult;
 use azalea_entity::{EntityKindComponent, metadata};
 use azalea_inventory::{Menu, components::MaxStackSize};
-use azalea_world::Worlds;
+use azalea_world::{Worlds, chunk::storage::WeakChunkStorage};
 use bevy_app::AppExit;
 use bevy_ecs::{message::Messages, query::With, world::EntityRef};
 use parking_lot::Mutex;
@@ -29,6 +29,14 @@ pub fn register(commands: &mut CommandDispatcher<Mutex<CommandSource>>) {
         source.reply("pong!");
         1
     }));
+    commands.register(
+        literal("say").then(argument("message", greedy_string()).executes(|ctx: &Ctx| {
+            let source = ctx.source.lock();
+            let message = get_string(ctx, "message").unwrap();
+            source.bot.chat(message);
+            1
+        })),
+    );
 
     commands.register(literal("disconnect").executes(|ctx: &Ctx| {
         let source = ctx.source.lock();
@@ -159,6 +167,22 @@ pub fn register(commands: &mut CommandDispatcher<Mutex<CommandSource>>) {
             1
         })),
     )));
+
+    commands.register(literal("inventory").executes(|ctx: &Ctx| {
+        let source = ctx.source.lock();
+        for item in source.bot.menu().slots() {
+            if item.is_empty() {
+                continue;
+            }
+            println!("{item:?}");
+            for (kind, data) in item.component_patch().iter() {
+                if let Some(data) = data {
+                    println!("- {kind} {data:?}");
+                }
+            }
+        }
+        1
+    }));
 
     commands.register(literal("pathfinderstate").executes(|ctx: &Ctx| {
         let source = ctx.source.lock();
@@ -341,19 +365,22 @@ pub fn register(commands: &mut CommandDispatcher<Mutex<CommandSource>>) {
                                 .unwrap();
                             if let Some(world) = world.upgrade() {
                                 let world = world.read();
-                                let strong_chunks = world
-                                    .chunks
-                                    .map
-                                    .iter()
-                                    .filter(|(_, v)| v.strong_count() > 0)
-                                    .count();
-                                writeln!(
-                                    report,
-                                    "- Chunks: {} strongly referenced, {} in map",
-                                    strong_chunks,
-                                    world.chunks.map.len()
-                                )
-                                .unwrap();
+                                let chunks = &world.chunks;
+                                let chunks = (chunks as &dyn Any).downcast_ref::<WeakChunkStorage>();
+                                if let Some(chunks) = chunks {
+                                    let strong_chunks = chunks
+                                        .map
+                                        .iter()
+                                        .filter(|(_, v)| v.strong_count() > 0)
+                                        .count();
+                                    writeln!(
+                                        report,
+                                        "- Chunks: {} strongly referenced, {} in map",
+                                        strong_chunks,
+                                        chunks.map.len()
+                                    )
+                                    .unwrap();
+                                }
                                 writeln!(
                                     report,
                                     "- Entities: {}",
