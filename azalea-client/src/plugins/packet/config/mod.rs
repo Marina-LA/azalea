@@ -7,6 +7,7 @@ use azalea_protocol::{
     packets::{ConnectionProtocol, config::*},
     read::{ReadPacketError, deserialize_packet},
 };
+use azalea_protocol::packets::config::s_select_known_packs::KnownPack;
 use bevy_ecs::prelude::*;
 pub use events::*;
 use tracing::{debug, warn};
