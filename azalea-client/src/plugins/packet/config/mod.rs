@@ -7,7 +7,6 @@ use azalea_protocol::{
     packets::{ConnectionProtocol, config::*},
     read::{ReadPacketError, deserialize_packet},
 };
-use azalea_protocol::packets::config::s_select_known_packs::KnownPack;
 use bevy_ecs::prelude::*;
 pub use events::*;
 use tracing::{debug, warn};
@@ -210,17 +209,12 @@ impl ConfigPacketHandler<'_> {
     pub fn select_known_packs(&mut self, p: &ClientboundSelectKnownPacks) {
         debug!("Got select known packs packet {p:?}");
 
-        // Echo back the minecraft:core known pack so the server knows we have
-        // vanilla registry data and skips sending full NBT payloads.
-        let known_packs: Vec<KnownPack> = p.known_packs.iter()
-            .filter(|kp| kp.namespace == "minecraft" && kp.id == "core")
-            .cloned()
-            .collect();
-
         as_system::<Commands>(self.ecs, |mut commands| {
             commands.trigger(SendConfigPacketEvent::new(
                 self.player,
-                ServerboundSelectKnownPacks { known_packs },
+                ServerboundSelectKnownPacks {
+                    known_packs: vec![],
+                },
             ));
         });
     }
