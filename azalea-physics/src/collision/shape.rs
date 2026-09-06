@@ -326,14 +326,6 @@ pub enum VoxelShape {
 }
 
 impl VoxelShape {
-    // public double min(Direction.Axis var1) {
-    //     int var2 = this.shape.firstFull(var1);
-    //     return var2 >= this.shape.getSize(var1) ? 1.0D / 0.0 : this.get(var1,
-    // var2); }
-    // public double max(Direction.Axis var1) {
-    //     int var2 = this.shape.lastFull(var1);
-    //     return var2 <= 0 ? -1.0D / 0.0 : this.get(var1, var2);
-    // }
     fn min(&self, axis: Axis) -> f64 {
         let first_full = self.shape().first_full(axis);
         if first_full >= self.shape().size(axis) as i32 {

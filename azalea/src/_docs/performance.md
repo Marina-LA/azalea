@@ -91,14 +91,15 @@ If the client doesn't need a high view distance, then you can reduce the number 
 This can be done by having something like the following in your handler function:
 ```rust,no_run
 # use azalea::ClientInformation;
-# async fn handle(bot: azalea::Client, event: azalea::Event, state: azalea::NoState) {
+# async fn handle(bot: azalea::Client, event: azalea::Event, state: azalea::NoState) -> azalea::error::AzaleaResult<()> {
 #    match event {
 azalea::Event::Init => bot.set_client_information(ClientInformation {
     view_distance: 2,
     ..Default::default()
-}),
+})?,
 # _ => {}
 # }
+# Ok(())
 # }
 ```
 

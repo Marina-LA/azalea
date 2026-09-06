@@ -3,7 +3,7 @@ pub mod debug;
 pub mod movement;
 
 use azalea::{
-    Client, brigadier::prelude::*, chat::ChatPacket, entity::metadata::Player,
+    Client, brigadier::prelude::*, client_chat::ChatPacket, entity::metadata::Player,
     player::GameProfileComponent,
 };
 use bevy_ecs::query::With;
@@ -11,7 +11,8 @@ use parking_lot::Mutex;
 
 use crate::State;
 
-pub type Ctx = CommandContext<Mutex<CommandSource>>;
+pub type Ctx = CommandContext<Mutex<CommandSource>, eyre::Result<i32>>;
+pub type Dispatcher = CommandDispatcher<Mutex<CommandSource>, eyre::Result<i32>>;
 
 pub struct CommandSource {
     pub bot: Client,
@@ -37,10 +38,12 @@ impl CommandSource {
             .any_entity_by::<&GameProfileComponent, With<Player>>(
                 |profile: &GameProfileComponent| profile.name == username,
             )
+            .ok()
+            .flatten()
     }
 }
 
-pub fn register_commands(commands: &mut CommandDispatcher<Mutex<CommandSource>>) {
+pub fn register_commands(commands: &mut Dispatcher) {
     combat::register(commands);
     debug::register(commands);
     movement::register(commands);

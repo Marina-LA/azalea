@@ -505,6 +505,10 @@ impl FormattedText {
                     for item in with {
                         with_array.push(PrimitiveOrComponent::Integer(item));
                     }
+                } else if let Some(with) = with_list.longs() {
+                    for item in with {
+                        with_array.push(PrimitiveOrComponent::Long(item));
+                    }
                 } else if let Some(with) = with_list.compounds() {
                     for item in with {
                         // if it's a string component with no styling and no siblings,
@@ -672,16 +676,6 @@ impl From<String> for FormattedText {
 impl From<&str> for FormattedText {
     fn from(s: &str) -> Self {
         Self::from(s.to_owned())
-    }
-}
-impl From<TranslatableComponent> for FormattedText {
-    fn from(c: TranslatableComponent) -> Self {
-        FormattedText::Translatable(c)
-    }
-}
-impl From<TextComponent> for FormattedText {
-    fn from(c: TextComponent) -> Self {
-        FormattedText::Text(c)
     }
 }
 

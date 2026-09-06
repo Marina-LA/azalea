@@ -53,9 +53,9 @@ async fn steal(bot: Client, state: State) -> eyre::Result<()> {
 
     loop {
         let chest_block = bot
-            .world()
+            .world()?
             .read()
-            .find_blocks(bot.position(), &BlockKind::Chest.into())
+            .find_blocks(bot.position()?, &BlockKind::Chest.into())
             .find(
                 // find the closest chest that hasn't been checked
                 |block_pos| !state.checked_chests.lock().contains(block_pos),
@@ -68,7 +68,7 @@ async fn steal(bot: Client, state: State) -> eyre::Result<()> {
 
         bot.goto(RadiusGoal::new(chest_block.center(), 3.)).await;
 
-        let Some(chest) = bot.open_container_at(chest_block).await else {
+        let Some(chest) = bot.open_container_at(chest_block).await? else {
             println!("Couldn't open chest at {chest_block:?}");
             continue;
         };

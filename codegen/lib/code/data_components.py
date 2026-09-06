@@ -208,6 +208,11 @@ use crate::{
                 component_value
             )
 
+    # sort the dict by component id to reduce reordering on updates
+    components_to_item_defaults = dict(
+        sorted(components_to_item_defaults.items(), key=lambda k: k[0])
+    )
+
     registries = lib.extract.get_builtin_registries_report(version_id)
     item_resource_id_to_protocol_id = {}
     item_resource_ids = [None] * len(registries["minecraft:item"]["entries"])

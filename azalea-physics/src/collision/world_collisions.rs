@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::{borrow::Cow, collections::HashSet, sync::Arc};
 
 use azalea_block::{BlockState, fluid_state::FluidState};
 use azalea_core::{
@@ -113,7 +113,7 @@ impl<'a> BlockCollisionsState<'a> {
             return;
         }
 
-        let block_shape = self.get_block_shape(block_state);
+        let block_shape = self.get_block_shape(block_state, item.pos);
 
         let block_shape = block_shape.move_relative(item.pos.to_vec3_floored());
         // if the entity shape and block shape don't collide, continue
@@ -207,15 +207,24 @@ impl<'a> BlockCollisionsState<'a> {
         section.get_block_state(section_block_pos)
     }
 
-    fn get_block_shape(&mut self, block_state: BlockState) -> &'static VoxelShape {
+    fn get_block_shape(
+        &mut self,
+        block_state: BlockState,
+        pos: BlockPos,
+    ) -> Cow<'static, VoxelShape> {
+        // TODO (2026-05-06): does this cache still help? i'm pretty sure getting shapes
+        // has been optimized since this cache was implemented
         for (cached_block_state, cached_shape) in &self.cached_block_shapes {
             if block_state == *cached_block_state {
-                return cached_shape;
+                return Cow::Borrowed(cached_shape);
             }
         }
 
-        let shape = block_state.collision_shape();
-        self.cached_block_shapes.push((block_state, shape));
+        let shape = block_state.collision_shape(pos);
+        // if it has a random offset then we can't cache them, and it'll be a Cow::Owned
+        if let Cow::Borrowed(shape) = shape {
+            self.cached_block_shapes.push((block_state, shape));
+        }
 
         shape
     }

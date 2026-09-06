@@ -51,7 +51,7 @@ impl ArgumentType for Double {
 pub fn double() -> impl ArgumentType {
     Double::default()
 }
-pub fn get_double<S>(context: &CommandContext<S>, name: &str) -> Option<f64> {
+pub fn get_double<S, R>(context: &CommandContext<S, R>, name: &str) -> Option<f64> {
     context
         .argument(name)
         .unwrap()

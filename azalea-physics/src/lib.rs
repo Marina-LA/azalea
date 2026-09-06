@@ -1,15 +1,15 @@
 #![doc = include_str!("../README.md")]
 #![feature(trait_alias)]
 
+pub mod client_movement;
 pub mod clip;
 pub mod collision;
 pub mod fluids;
-pub mod local_player;
 pub mod travel;
 
 use std::collections::HashSet;
 
-use azalea_block::{BlockState, BlockTrait, fluid_state::FluidState, properties};
+use azalea_block::{BlockState, fluid_state::FluidState, properties};
 use azalea_core::{
     math,
     position::{BlockPos, Vec3},
@@ -27,7 +27,10 @@ use bevy_ecs::prelude::*;
 use clip::box_traverse_blocks;
 use collision::{BLOCK_SHAPE, BlockWithShape, VoxelShape, move_colliding};
 
-use crate::collision::{MoveCtx, entity_collisions::update_last_bounding_box};
+use crate::{
+    client_movement::ClientMovementState,
+    collision::{MoveCtx, entity_collisions::update_last_bounding_box},
+};
 
 /// A Bevy [`SystemSet`] for running physics that makes entities do things.
 #[derive(Clone, Debug, Eq, Hash, PartialEq, SystemSet)]
@@ -73,6 +76,7 @@ pub fn ai_step(
             &ActiveEffects,
             &WorldName,
             &EntityKindComponent,
+            &ClientMovementState,
         ),
         (With<LocalEntity>, With<HasClientLoaded>),
     >,
@@ -87,6 +91,7 @@ pub fn ai_step(
         active_effects,
         world_name,
         entity_kind,
+        client_movement,
     ) in &mut query
     {
         let is_player = **entity_kind == EntityKind::Player;
@@ -121,6 +126,10 @@ pub fn ai_step(
         } else {
             physics.x_acceleration *= 0.98;
             physics.z_acceleration *= 0.98;
+        }
+
+        if client_movement.trying_to_crouch && physics.is_in_water() {
+            go_down_in_water(&mut physics);
         }
 
         if jumping == Some(&Jumping(true)) {
@@ -169,7 +178,11 @@ pub fn ai_step(
 }
 
 fn jump_in_liquid(physics: &mut Physics) {
-    physics.velocity.y += 0.04;
+    physics.velocity.y += 0.04f32 as f64;
+}
+
+fn go_down_in_water(physics: &mut Physics) {
+    physics.velocity.y -= 0.04f32 as f64;
 }
 
 // in minecraft, this is done as part of aiStep immediately after travel
@@ -495,7 +508,7 @@ fn block_jump_factor(world: &World, position: Position) -> f32 {
         .get_block_state(get_block_pos_below_that_affects_movement(position));
 
     let block_at_pos_jump_factor = if let Some(block) = block_at_pos {
-        Box::<dyn BlockTrait>::from(block).behavior().jump_factor
+        block.behavior().jump_factor
     } else {
         1.
     };
@@ -504,7 +517,7 @@ fn block_jump_factor(world: &World, position: Position) -> f32 {
     }
 
     if let Some(block) = block_below {
-        Box::<dyn BlockTrait>::from(block).behavior().jump_factor
+        block.behavior().jump_factor
     } else {
         1.
     }

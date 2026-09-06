@@ -15,7 +15,7 @@
 
 use std::collections::VecDeque;
 
-use azalea_client::chat::{ChatPacket, ChatReceivedEvent};
+use azalea_client::client_chat::{ChatPacket, ChatReceivedEvent};
 use bevy_app::{App, Plugin, Update};
 
 use super::{Swarm, SwarmEvent};
@@ -173,7 +173,7 @@ mod tests {
     fn drain_messages(ecs: &mut World) -> Vec<ChatPacket> {
         let mut system_state: SystemState<ResMut<Messages<NewChatMessageEvent>>> =
             SystemState::new(ecs);
-        let mut messages = system_state.get_mut(ecs);
+        let mut messages = system_state.get_mut(ecs).unwrap();
 
         messages.drain().map(|e| e.0.clone()).collect::<Vec<_>>()
     }

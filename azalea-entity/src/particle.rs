@@ -15,6 +15,13 @@ pub enum Particle {
     Block(BlockParticle),
     BlockMarker(BlockParticle),
     Bubble,
+    SulfurBubbles,
+    NoxiousGas,
+    NoxiousGasCloud,
+    Geyser(GeyserParticle),
+    GeyserBase(GeyserBaseParticle),
+    GeyserPoof(GeyserBaseParticle),
+    GeyserPlume(GeyserParticle),
     Cloud,
     CopperFireFlame,
     Crit,
@@ -128,6 +135,7 @@ pub enum Particle {
     TrialOmen,
     BlockCrumble,
     Firefly,
+    SulfurCubeGoo,
 }
 
 impl From<ParticleKind> for Particle {
@@ -258,6 +266,14 @@ impl From<ParticleKind> for Particle {
             ParticleKind::CopperFireFlame => Self::CopperFireFlame,
             ParticleKind::PauseMobGrowth => Self::PauseMobGrowth,
             ParticleKind::ResetMobGrowth => Self::ResetMobGrowth,
+            ParticleKind::SulfurBubbles => Self::SulfurBubbles,
+            ParticleKind::NoxiousGas => Self::NoxiousGas,
+            ParticleKind::NoxiousGasCloud => Self::NoxiousGasCloud,
+            ParticleKind::Geyser => Self::Geyser(GeyserParticle::default()),
+            ParticleKind::GeyserBase => Self::GeyserBase(GeyserBaseParticle::default()),
+            ParticleKind::GeyserPoof => Self::GeyserPoof(GeyserBaseParticle::default()),
+            ParticleKind::GeyserPlume => Self::GeyserPlume(GeyserParticle::default()),
+            ParticleKind::SulfurCubeGoo => Self::SulfurCubeGoo,
         }
     }
 }
@@ -327,6 +343,18 @@ pub struct SculkChargeParticle {
 
 #[derive(AzBuf, Clone, Debug, Default, PartialEq)]
 pub struct ShriekParticle {
+    /// The time in ticks before the particle is displayed.
     #[var]
-    pub delay: i32, // The time in ticks before the particle is displayed
+    pub delay: i32,
+}
+
+#[derive(AzBuf, Clone, Debug, Default, PartialEq)]
+pub struct GeyserParticle {
+    pub water_blocks: i32,
+}
+
+#[derive(AzBuf, Clone, Debug, Default, PartialEq)]
+pub struct GeyserBaseParticle {
+    pub water_blocks: i32,
+    pub burst_impulse_base: f32,
 }

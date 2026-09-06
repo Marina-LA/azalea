@@ -1,10 +1,10 @@
-use azalea_block::{BlockState, BlockTrait, fluid_state::FluidKind};
+use azalea_block::{BlockState, fluid_state::FluidKind};
 use azalea_core::position::BlockPos;
 use azalea_entity::{ActiveEffects, Attributes, FluidOnEyes, Physics, inventory::Inventory};
 use azalea_inventory::{ItemStack, Menu, components};
 use azalea_registry::builtin::{BlockKind, EntityKind};
 
-use crate::Client;
+use crate::{Client, client_impl::error::AzaleaResult};
 
 #[derive(Debug)]
 pub struct BestToolResult {
@@ -13,7 +13,7 @@ pub struct BestToolResult {
 }
 
 impl Client {
-    pub fn best_tool_in_hotbar_for_block(&self, block: BlockState) -> BestToolResult {
+    pub fn best_tool_in_hotbar_for_block(&self, block: BlockState) -> AzaleaResult<BestToolResult> {
         self.query_self::<(
             &Inventory,
             &Physics,
@@ -35,15 +35,16 @@ impl Client {
         )
     }
 
-    pub async fn mine_with_auto_tool(&self, block_pos: BlockPos) {
+    pub async fn mine_with_auto_tool(&self, block_pos: BlockPos) -> AzaleaResult<()> {
         let block_state = self
-            .world()
+            .world()?
             .read()
             .get_block_state(block_pos)
             .unwrap_or_default();
-        let best_tool_result = self.best_tool_in_hotbar_for_block(block_state);
+        let best_tool_result = self.best_tool_in_hotbar_for_block(block_state)?;
         self.set_selected_hotbar_slot(best_tool_result.index as u8);
         self.mine(block_pos).await;
+        Ok(())
     }
 }
 
@@ -80,7 +81,7 @@ pub fn accurate_best_tool_in_hotbar_for_block(
     let mut best_speed = 0.;
     let mut best_slot = None;
 
-    let block = Box::<dyn BlockTrait>::from(block);
+    let block = block.to_trait();
     let registry_block = block.as_block_kind();
 
     if matches!(registry_block, BlockKind::Water | BlockKind::Lava) {
@@ -97,7 +98,7 @@ pub fn accurate_best_tool_in_hotbar_for_block(
         match item_stack_data {
             ItemStack::Empty => {
                 this_item_speed = Some(azalea_entity::mining::get_mine_progress(
-                    block.as_ref(),
+                    block,
                     &ItemStack::Empty,
                     fluid_on_eyes,
                     physics,
@@ -110,7 +111,7 @@ pub fn accurate_best_tool_in_hotbar_for_block(
                 // data yet
                 if !item_stack.component_patch.has::<components::Damage>() {
                     this_item_speed = Some(azalea_entity::mining::get_mine_progress(
-                        block.as_ref(),
+                        block,
                         item_stack_data,
                         fluid_on_eyes,
                         physics,
@@ -134,7 +135,7 @@ pub fn accurate_best_tool_in_hotbar_for_block(
     for (i, item_stack) in hotbar_slots.iter().enumerate() {
         if item_stack.is_present() {
             let this_item_speed = azalea_entity::mining::get_mine_progress(
-                block.as_ref(),
+                block,
                 item_stack,
                 fluid_on_eyes,
                 physics,

@@ -51,7 +51,7 @@ impl ArgumentType for Integer {
 pub fn integer() -> impl ArgumentType {
     Integer::default()
 }
-pub fn get_integer<S>(context: &CommandContext<S>, name: &str) -> Option<i32> {
+pub fn get_integer<S, R>(context: &CommandContext<S, R>, name: &str) -> Option<i32> {
     context
         .argument(name)
         .unwrap()

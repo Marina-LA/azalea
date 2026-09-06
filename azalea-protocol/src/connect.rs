@@ -37,7 +37,7 @@ use crate::{
         status::{ClientboundStatusPacket, ServerboundStatusPacket},
     },
     read::{ReadPacketError, deserialize_packet, read_raw_packet, try_read_raw_packet},
-    write::{serialize_packet, write_raw_packet},
+    write::{serialize_packet, write_raw_packet, write_raw_packets},
 };
 
 pub struct RawReadConnection {
@@ -189,6 +189,27 @@ impl RawWriteConnection {
         Ok(())
     }
 
+    pub async fn write_batch(&mut self, packets: impl Iterator<Item = &[u8]>) -> io::Result<()> {
+        if let Err(e) = write_raw_packets(
+            packets,
+            &mut self.write_stream,
+            self.compression_threshold,
+            &mut self.enc_cipher,
+        )
+        .await
+        {
+            // detect broken pipe
+            if e.kind() == io::ErrorKind::BrokenPipe {
+                info!("Broken pipe, shutting down connection.");
+                if let Err(e) = self.shutdown().await {
+                    error!("Couldn't shut down: {}", e);
+                }
+            }
+            return Err(e);
+        }
+        Ok(())
+    }
+
     /// End the connection.
     pub async fn shutdown(&mut self) -> io::Result<()> {
         self.write_stream.shutdown().await
@@ -223,6 +244,17 @@ where
         self.raw.write(&serialize_packet(&packet).unwrap()).await
     }
 
+    /// Write a batch of packets to the server
+    pub async fn write_batch(&mut self, packets: &[W]) -> io::Result<()> {
+        let serialized_packets: Vec<Box<[u8]>> = packets
+            .iter()
+            .map(|packet| serialize_packet(packet).unwrap())
+            .collect();
+        self.raw
+            .write_batch(serialized_packets.iter().map(|data| data.as_ref()))
+            .await
+    }
+
     /// End the connection.
     pub async fn shutdown(&mut self) -> io::Result<()> {
         self.raw.shutdown().await
@@ -249,6 +281,11 @@ where
     pub async fn write(&mut self, packet: impl crate::packets::Packet<W>) -> io::Result<()> {
         let packet = packet.into_variant();
         self.writer.write(packet).await
+    }
+
+    /// Write a batch of packets to the other side of the connection.
+    pub async fn write_batch(&mut self, packets: &[W]) -> io::Result<()> {
+        self.writer.write_batch(packets).await
     }
 
     /// Split the reader and writer into two objects.

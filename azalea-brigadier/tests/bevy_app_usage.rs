@@ -86,7 +86,7 @@ impl DispatchStorage {
                 let result = storage.dispatch.execute("spawn_entity", source.clone());
 
                 // Ensure the command was successful
-                assert_eq!(result, Ok(0));
+                assert_eq!(result.unwrap(), 0);
 
                 // Query the World for the spawned entity
                 let mut world = source.write();
@@ -106,7 +106,7 @@ impl DispatchStorage {
                     .execute("spawn_entity_num 3", source.clone());
 
                 // Ensure the command was successful
-                assert_eq!(result, Ok(0));
+                assert_eq!(result.unwrap(), 0);
 
                 // Query the World for spawned entities
                 let mut world = source.write();

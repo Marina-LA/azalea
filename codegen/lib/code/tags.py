@@ -62,6 +62,7 @@ use crate::{{{registry_module}::{struct_name}, tags::RegistryTag}};
         generated += f"pub static {static_set_name}: LazyLock<RegistryTag<{struct_name}>> = LazyLock::new(|| RegistryTag::new(vec!["
 
         if not is_data_registry:
+            assert protocol_ids is not None
             # this is important because we binary search registries in some cases
             # and they need to be sorted by their rust Ord order
             entries.sort(key=lambda e: protocol_ids[e])

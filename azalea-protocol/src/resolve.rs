@@ -5,9 +5,12 @@ use std::{
     sync::LazyLock,
 };
 
-pub use hickory_resolver::ResolveError;
+pub use hickory_resolver::net::NetError as ResolveError;
 use hickory_resolver::{
-    Name, TokioResolver, config::ResolverConfig, name_server::TokioConnectionProvider,
+    Resolver, TokioResolver,
+    config::{GOOGLE, ResolverConfig},
+    net::runtime::TokioRuntimeProvider,
+    proto::rr::{Name, RData},
 };
 use tracing::warn;
 
@@ -18,15 +21,17 @@ use crate::address::ServerAddr;
 pub type ResolverError = ResolveError;
 
 static RESOLVER: LazyLock<TokioResolver> = LazyLock::new(|| {
-    TokioResolver::builder(TokioConnectionProvider::default())
+    Resolver::builder_tokio()
         .unwrap_or_else(|_| {
             warn!("System DNS resolver unavailable; falling back to Google DNS.");
-            TokioResolver::builder_with_config(
-                ResolverConfig::google(),
-                TokioConnectionProvider::default(),
+
+            Resolver::builder_with_config(
+                ResolverConfig::udp_and_tcp(&GOOGLE),
+                TokioRuntimeProvider::new(),
             )
         })
         .build()
+        .unwrap()
 });
 
 /// Resolve a Minecraft server address into an IP address and port.
@@ -53,9 +58,7 @@ async fn resolve_ip_without_redirects(address: &ServerAddr) -> Result<SocketAddr
     let ip = lookup_ip
         .iter()
         .next()
-        .ok_or(hickory_resolver::ResolveError::from(
-            "No A/AAAA record found",
-        ))?;
+        .ok_or(ResolveError::from("No A/AAAA record found"))?;
 
     Ok(SocketAddr::new(ip, address.port))
 }
@@ -69,11 +72,17 @@ async fn resolve_srv_redirect(address: &ServerAddr) -> Result<ServerAddr, Resolv
     let res = RESOLVER.srv_lookup(query).await?;
 
     let srv = res
-        .iter()
-        .next()
+        .answers()
+        .first()
         .ok_or(ResolveError::from("No SRV record found"))?;
+    let RData::SRV(srv) = &srv.data else {
+        return Err(ResolveError::from(
+            "Record returned from SRV lookup wasn't SRV",
+        ));
+    };
+
     Ok(ServerAddr {
-        host: srv.target().to_ascii(),
-        port: srv.port(),
+        host: srv.target.to_ascii(),
+        port: srv.port,
     })
 }

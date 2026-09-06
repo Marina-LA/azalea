@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use azalea_client::{
-    PhysicsState, interact::BlockStatePredictionHandler, local_player::LocalGameMode,
+    ClientMovementState, interact::BlockStatePredictionHandler, local_player::PreviousGameMode,
     mining::MineBundle,
 };
 use azalea_core::{
@@ -16,7 +16,7 @@ use azalea_entity::{
 use azalea_registry::builtin::EntityKind;
 use azalea_world::{ChunkStorage, PartialWorld, World, WorldName, Worlds};
 use bevy_app::App;
-use bevy_ecs::prelude::*;
+use bevy_ecs::{prelude::*, schedule::SingleThreadedExecutor};
 use parking_lot::RwLock;
 use uuid::Uuid;
 
@@ -24,7 +24,7 @@ use uuid::Uuid;
 pub struct SimulatedPlayerBundle {
     pub position: Position,
     pub physics: Physics,
-    pub physics_state: PhysicsState,
+    pub physics_state: ClientMovementState,
     pub look_direction: LookDirection,
     pub attributes: Attributes,
     pub inventory: Inventory,
@@ -37,7 +37,7 @@ impl SimulatedPlayerBundle {
         SimulatedPlayerBundle {
             position: Position::new(position),
             physics: Physics::new(&dimensions, position),
-            physics_state: PhysicsState::default(),
+            physics_state: ClientMovementState::default(),
             look_direction: LookDirection::default(),
             attributes: Attributes::new(EntityKind::Player),
             inventory: Inventory::default(),
@@ -80,7 +80,7 @@ fn create_simulation_world(chunks: ChunkStorage) -> (App, Arc<RwLock<World>>) {
     });
 
     app.edit_schedule(bevy_app::Main, |schedule| {
-        schedule.set_executor_kind(bevy_ecs::schedule::ExecutorKind::SingleThreaded);
+        schedule.set_executor(SingleThreadedExecutor::new());
     });
 
     app.finish();
@@ -110,7 +110,8 @@ fn create_simulation_player_complete_bundle(
             shared: world.clone(),
         },
         Inventory::default(),
-        LocalGameMode::from(GameMode::Survival),
+        GameMode::Survival,
+        PreviousGameMode(None),
         MineBundle::default(),
         BlockStatePredictionHandler::default(),
         azalea_client::local_player::PermissionLevel::default(),

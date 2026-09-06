@@ -3,11 +3,12 @@ mod discrete_voxel_shape;
 pub mod entity_collisions;
 mod mergers;
 mod shape;
+mod shape_offset;
 pub mod world_collisions;
 
 use std::{ops::Add, sync::LazyLock};
 
-use azalea_block::{BlockState, BlockTrait, fluid_state::FluidState};
+use azalea_block::{BlockState, fluid_state::FluidState};
 use azalea_core::{
     aabb::Aabb,
     direction::Axis,
@@ -29,7 +30,8 @@ use tracing::warn;
 
 use self::world_collisions::get_block_collisions;
 use crate::{
-    collision::entity_collisions::AabbQuery, local_player::PhysicsState, travel::no_collision,
+    client_movement::ClientMovementState, collision::entity_collisions::AabbQuery,
+    travel::no_collision,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -116,7 +118,7 @@ pub struct MoveCtx<'world, 'state, 'a, 'b> {
     pub source_entity: Entity,
     pub aabb_query: &'a AabbQuery<'world, 'state, 'b>,
     pub collidable_entity_query: &'a CollidableEntityQuery<'world, 'state>,
-    pub physics_state: Option<&'a PhysicsState>,
+    pub physics_state: Option<&'a ClientMovementState>,
     pub attributes: &'a Attributes,
     pub abilities: Option<&'a PlayerAbilities>,
 
@@ -492,12 +494,11 @@ pub fn legacy_blocks_motion(block: BlockState) -> bool {
 
 pub fn legacy_calculate_solid(block: BlockState) -> bool {
     // force_solid has to be checked before anything else
-    let block_trait = Box::<dyn BlockTrait>::from(block);
-    if let Some(solid) = block_trait.behavior().force_solid {
+    if let Some(solid) = block.behavior().force_solid {
         return solid;
     }
 
-    let shape = block.collision_shape();
+    let shape = block.base_collision_shape();
     if shape.is_empty() {
         return false;
     }

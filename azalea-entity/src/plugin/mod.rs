@@ -4,9 +4,10 @@ pub mod indexing;
 
 use std::collections::HashSet;
 
-use azalea_block::{BlockState, BlockTrait, fluid_state::FluidKind, properties};
+use azalea_block::{BlockState, fluid_state::FluidKind, properties};
 use azalea_core::{
     entity_id::MinecraftEntityId,
+    game_type::GameMode,
     position::{BlockPos, ChunkPos},
     tick::GameTick,
 };
@@ -34,6 +35,10 @@ pub enum EntityUpdateSystems {
     /// Remove despawned entities from search indexes.
     Deindex,
 }
+
+/// A Bevy [`SystemSet`] for post travel update for dimension and boundingbox
+#[derive(Clone, Debug, Eq, Hash, PartialEq, SystemSet)]
+pub struct EntityGeometryUpdateSystems;
 
 /// Plugin handling some basic entity functionality.
 pub struct EntityPlugin;
@@ -66,7 +71,16 @@ impl Plugin for EntityPlugin {
                 ),
             ),
         )
-        .add_systems(GameTick, (update_in_loaded_chunk, update_fluid_on_eyes))
+        .add_systems(
+            GameTick,
+            (
+                update_in_loaded_chunk,
+                update_fluid_on_eyes,
+                (update_dimensions, update_bounding_box)
+                    .chain()
+                    .in_set(EntityGeometryUpdateSystems),
+            ),
+        )
         .add_observer(handle_add_effect)
         .add_observer(handle_remove_effects)
         .init_resource::<EntityUuidIndex>();
@@ -127,17 +141,13 @@ pub fn update_fluid_on_eyes(
 }
 
 pub fn update_on_climbable(
-    mut query: Query<(&mut OnClimbable, &Position, &WorldName), With<LocalEntity>>,
+    mut query: Query<(&mut OnClimbable, &Position, &WorldName, &GameMode), With<LocalEntity>>,
     worlds: Res<Worlds>,
 ) {
-    for (mut on_climbable, position, world_name) in query.iter_mut() {
-        // TODO: there's currently no gamemode component that can be accessed from here,
-        // maybe LocalGameMode should be replaced with two components, maybe called
-        // EntityGameMode and PreviousGameMode?
-
-        // if game_mode == GameMode::Spectator {
-        //     continue;
-        // }
+    for (mut on_climbable, position, world_name, &game_mode) in query.iter_mut() {
+        if game_mode == GameMode::Spectator {
+            continue;
+        }
 
         let Some(world) = worlds.get(world_name) else {
             continue;
@@ -146,16 +156,16 @@ pub fn update_on_climbable(
         let world = world.read();
 
         let block_pos = BlockPos::from(position);
-        let block_state_at_feet = world.get_block_state(block_pos).unwrap_or_default();
-        let block_at_feet = Box::<dyn BlockTrait>::from(block_state_at_feet);
+        let block_at_feet = world.get_block_state(block_pos).unwrap_or_default();
         let registry_block_at_feet = block_at_feet.as_block_kind();
 
         **on_climbable = tags::blocks::CLIMBABLE.contains(&registry_block_at_feet)
             || (tags::blocks::TRAPDOORS.contains(&registry_block_at_feet)
-                && is_trapdoor_usable_as_ladder(block_state_at_feet, block_pos, &world));
+                && is_trapdoor_usable_as_ladder(block_at_feet, block_pos, &world));
     }
 }
 
+#[expect(clippy::needless_bool, reason = "Kept for future improvements")]
 fn is_trapdoor_usable_as_ladder(
     block_state: BlockState,
     block_pos: BlockPos,

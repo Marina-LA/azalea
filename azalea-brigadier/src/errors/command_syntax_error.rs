@@ -77,8 +77,8 @@ impl CommandSyntaxError {
         &self.kind
     }
 
-    pub fn input(&self) -> &Option<String> {
-        &self.input
+    pub fn input(&self) -> Option<&str> {
+        self.input.as_deref()
     }
 
     pub fn cursor(&self) -> Option<usize> {

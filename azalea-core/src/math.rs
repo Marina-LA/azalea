@@ -4,6 +4,8 @@ use std::{
     sync::LazyLock,
 };
 
+use crate::position::BlockPos;
+
 pub const EPSILON: f64 = 1.0e-7;
 
 // has to be boxed to avoid a stack overflow on windows when run in debug mode
@@ -105,6 +107,18 @@ pub fn ceil_long(x: f64) -> i64 {
 
 pub fn equal(a: f64, b: f64) -> bool {
     (b - a).abs() < 1.0e-5
+}
+
+/// Hashes the given block position.
+pub fn get_seed(pos: BlockPos) -> i64 {
+    let seed = ((pos.x.wrapping_mul(3129871)) as i64)
+        ^ ((pos.z as i64).wrapping_mul(116129781))
+        ^ (pos.y as i64);
+    let seed = seed
+        .wrapping_mul(seed)
+        .wrapping_mul(42317861)
+        .wrapping_add(seed.wrapping_mul(11));
+    seed >> 16
 }
 
 #[cfg(test)]

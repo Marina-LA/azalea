@@ -51,7 +51,7 @@ impl ArgumentType for Float {
 pub fn float() -> impl ArgumentType {
     Float::default()
 }
-pub fn get_float<S>(context: &CommandContext<S>, name: &str) -> Option<f32> {
+pub fn get_float<S, R>(context: &CommandContext<S, R>, name: &str) -> Option<f32> {
     context
         .argument(name)
         .unwrap()

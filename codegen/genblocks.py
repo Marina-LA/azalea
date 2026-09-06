@@ -19,7 +19,9 @@ def generate(version_id):
     lib.code.blocks.generate_blocks(
         block_states_report, pumpkin_blocks_data, ordered_blocks, burger_data
     )
-    lib.code.shapes.generate_block_shapes(pumpkin_blocks_data, block_states_report)
+    lib.code.shapes.generate_block_shapes(
+        pumpkin_blocks_data, block_states_report, burger_data
+    )
 
     lib.code.utils.fmt()
 

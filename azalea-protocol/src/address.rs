@@ -4,9 +4,7 @@ use std::{
     str::FromStr,
 };
 
-use hickory_resolver::ResolveError;
-
-use crate::resolve::resolve_address;
+use crate::{resolve::resolve_address, resolver::ResolveError};
 
 /// Something that might be able to be parsed and looked up as a server address.
 ///

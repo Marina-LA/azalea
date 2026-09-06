@@ -17,7 +17,7 @@ use azalea_core::{
     codec_utils::*,
     filterable::Filterable,
     position::GlobalPos,
-    registry_holder::{RegistryHolder, dimension_type::DamageTypeElement},
+    registry_holder::RegistryHolder,
     sound::CustomSound,
 };
 use azalea_registry::{
@@ -306,6 +306,7 @@ define_data_components!(
     CowSoundVariant,
     ChickenSoundVariant,
     CatSoundVariant,
+    SulfurCubeContent,
 );
 
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
@@ -1664,17 +1665,19 @@ pub struct ProvidesTrimMaterial {
 
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
 pub struct DirectTrimMaterial {
+    #[serde(flatten)]
     pub assets: MaterialAssetGroup,
     pub description: FormattedText,
 }
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
 pub struct MaterialAssetGroup {
-    pub base: AssetInfo,
+    pub assert_name: AssetInfo,
     #[serde(skip_serializing_if = "is_default")]
-    pub overrides: Vec<(Identifier, AssetInfo)>,
+    pub override_armor_assets: Vec<(Identifier, AssetInfo)>,
 }
 
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
+#[serde(transparent)]
 pub struct AssetInfo {
     pub suffix: String,
 }
@@ -1745,7 +1748,7 @@ pub struct MinimumAttackCharge {
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct DamageType {
-    pub value: Holder<azalea_registry::data::DamageKind, DamageTypeElement>,
+    pub value: azalea_registry::data::DamageKind,
 }
 
 #[derive(AzBuf, Clone, Debug, PartialEq, Serialize)]
@@ -1885,32 +1888,44 @@ impl Default for AttackRange {
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct AdditionalTradeCost {
     #[var]
     pub cost: i32,
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct Dye {
     pub color: DyeColor,
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct PigSoundVariant {
     pub value: azalea_registry::data::PigSoundVariant,
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct CowSoundVariant {
     pub value: azalea_registry::data::CowSoundVariant,
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct ChickenSoundVariant {
     pub value: azalea_registry::data::ChickenSoundVariant,
 }
 
 #[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
 pub struct CatSoundVariant {
     pub value: azalea_registry::data::CatSoundVariant,
+}
+
+#[derive(Clone, PartialEq, AzBuf, Debug, Serialize)]
+#[serde(transparent)]
+pub struct SulfurCubeContent {
+    pub absorbed_block_item_stack: ItemStack,
 }

@@ -12,7 +12,7 @@ use std::sync::{
     atomic::{self, AtomicBool},
 };
 
-use azalea_client::{account::Account, chat::ChatPacket, join::ConnectOpts};
+use azalea_client::{account::Account, client_chat::ChatPacket, join::ConnectOpts};
 use azalea_entity::LocalEntity;
 use azalea_protocol::address::ResolvedAddr;
 use azalea_world::Worlds;
@@ -66,6 +66,9 @@ pub enum SwarmEvent {
     /// This is only fired once, and it's guaranteed to be the first event to
     /// fire.
     Init,
+    /// This is fired every Minecraft tick (in the
+    /// [`GameTick`](azalea_core::tick::GameTick) schedule).
+    Tick,
     /// A bot got disconnected from the server.
     ///
     /// If you'd like to implement special auto-reconnect behavior beyond what's

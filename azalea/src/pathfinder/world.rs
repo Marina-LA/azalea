@@ -1,7 +1,7 @@
-use core::f32;
 use std::{
     array,
     cell::{RefCell, UnsafeCell},
+    fmt::Debug,
     mem,
     sync::Arc,
 };
@@ -50,48 +50,61 @@ pub struct CachedWorld {
 // doesn't contain any unnecessary data like heightmaps or biomes.
 type CachedChunk = Box<[PalettedContainer<BlockState>]>;
 
-#[derive(Default)]
 pub struct CachedSections {
-    pub last_index: usize,
-    pub second_last_index: usize,
-    pub sections: Vec<CachedSection>,
+    pub fast_sections: Box<[Option<CachedSection>; FAST_SECTIONS_CACHE_SIZE]>,
+    pub fallback_sections: Vec<CachedSection>,
+}
+
+const FAST_SECTIONS_CACHE_SIZE: usize = 16 * 16 * 16;
+fn fast_section_idx(pos: SmallChunkSectionPos) -> usize {
+    (pos.y as usize % 16) + (pos.x as usize % 16) * 16 + (pos.z as usize % 16) * 16 * 16
 }
 
 impl CachedSections {
-    #[inline]
     pub fn get_mut(&mut self, pos: SmallChunkSectionPos) -> Option<&mut CachedSection> {
-        if let Some(last_item) = self.sections.get(self.last_index) {
-            if last_item.pos == pos {
-                return Some(&mut self.sections[self.last_index]);
-            } else if let Some(second_last_item) = self.sections.get(self.second_last_index)
-                && second_last_item.pos == pos
-            {
-                return Some(&mut self.sections[self.second_last_index]);
-            }
+        let idx = fast_section_idx(pos);
+
+        if let Some(fast_item) = &mut self.fast_sections[idx]
+            && fast_item.pos == pos
+        {
+            return Some(fast_item);
         }
 
-        let index = self
-            .sections
-            .binary_search_by(|section| section.pos.cmp(&pos))
-            .ok();
-
-        if let Some(index) = index {
-            self.second_last_index = self.last_index;
-            self.last_index = index;
-            return Some(&mut self.sections[index]);
+        if let Some(item) = self.fallback_sections.iter_mut().find(|s| s.pos == pos) {
+            return Some(item);
         }
+
         None
     }
 
     #[inline]
     pub fn insert(&mut self, section: CachedSection) {
-        // self.sections.push(section);
-        // self.sections.sort_unstable_by(|a, b| a.pos.cmp(&b.pos));
+        let idx = fast_section_idx(section.pos);
+
+        if let item @ None = &mut self.fast_sections[idx] {
+            *item = Some(section);
+            return;
+        }
+
+        // this benchmarks better than pushing even when we linear search later. i guess
+        // it has better cache locality?
         let index = self
-            .sections
+            .fallback_sections
             .binary_search_by(|s| s.pos.cmp(&section.pos))
             .unwrap_or_else(|e| e);
-        self.sections.insert(index, section);
+        self.fallback_sections.insert(index, section);
+    }
+}
+impl Default for CachedSections {
+    fn default() -> Self {
+        Self {
+            fast_sections: (0..FAST_SECTIONS_CACHE_SIZE)
+                .map(|_| None)
+                .collect::<Box<[_]>>()
+                .try_into()
+                .unwrap(),
+            fallback_sections: Default::default(),
+        }
     }
 }
 
@@ -99,6 +112,14 @@ pub struct CachedSection {
     pub pos: SmallChunkSectionPos,
     pub bitsets: Box<SectionBitsets>,
 }
+impl Debug for CachedSection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CachedSection")
+            .field("pos", &self.pos)
+            .finish()
+    }
+}
+
 #[derive(Default)]
 pub struct SectionBitsets {
     /// Blocks that we can fully pass through (like air).
@@ -639,18 +660,19 @@ pub fn is_block_state_passable(block_state: BlockState) -> bool {
 /// Whether this block has a solid hitbox at the top (i.e. we can stand on it
 /// and do parkour from it).
 #[inline]
+#[expect(clippy::needless_bool, reason = "Kept for future improvements")]
 pub fn is_block_state_solid(block_state: BlockState) -> bool {
     if block_state.is_air() {
         // fast path
         return false;
     }
 
-    // hazard
-    if block_state == BlockState::from(BlockKind::MagmaBlock) {
-        return false;
-    };
-
     if block_state.is_collision_shape_full() {
+        // hazard
+        if block_state == BlockState::from(BlockKind::MagmaBlock) {
+            return false;
+        };
+
         return true;
     }
 

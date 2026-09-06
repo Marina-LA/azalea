@@ -1,5 +1,6 @@
 #![doc = include_str!("../README.md")]
 #![feature(error_generic_member_access)]
+#![allow(clippy::type_complexity, reason = "Bevy Query types")]
 
 pub mod account;
 mod client;
@@ -15,7 +16,10 @@ pub mod test_utils;
 #[deprecated = "moved to `account::Account`."]
 pub type Account = account::Account;
 
-pub use azalea_physics::local_player::{PhysicsState, SprintDirection, WalkDirection};
+pub use azalea_physics::client_movement::{ClientMovementState, SprintDirection, WalkDirection};
+#[deprecated = "renamed to `ClientMovementState`."]
+pub type PhysicsState = ClientMovementState;
+
 pub use azalea_protocol::common::client_information::ClientInformation;
 // Re-export bevy-tasks so plugins can make sure that they're using the same
 // version.

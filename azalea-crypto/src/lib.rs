@@ -6,7 +6,7 @@ pub mod signing;
 
 use aes::{
     Aes128,
-    cipher::{BlockDecryptMut, BlockEncryptMut, KeyIvInit, inout::InOutBuf},
+    cipher::{BlockModeDecrypt, BlockModeEncrypt, KeyIvInit, inout::InOutBuf},
 };
 use rand::{TryRng, rngs::SysRng};
 use sha1::{Digest, Sha1};
@@ -92,12 +92,12 @@ pub fn create_cipher(key: &[u8]) -> (Aes128CfbEnc, Aes128CfbDec) {
 pub fn encrypt_packet(cipher: &mut Aes128CfbEnc, packet: &mut [u8]) {
     let (chunks, rest) = InOutBuf::from(packet).into_chunks();
     assert!(rest.is_empty());
-    cipher.encrypt_blocks_inout_mut(chunks);
+    cipher.encrypt_blocks_inout(chunks);
 }
 pub fn decrypt_packet(cipher: &mut Aes128CfbDec, packet: &mut [u8]) {
     let (chunks, rest) = InOutBuf::from(packet).into_chunks();
     assert!(rest.is_empty());
-    cipher.decrypt_blocks_inout_mut(chunks);
+    cipher.decrypt_blocks_inout(chunks);
 }
 
 #[cfg(test)]

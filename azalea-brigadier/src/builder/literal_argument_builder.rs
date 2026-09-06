@@ -12,13 +12,13 @@ impl Literal {
     }
 }
 
-impl<S> From<Literal> for ArgumentBuilderType<S> {
+impl<S, R> From<Literal> for ArgumentBuilderType<S, R> {
     fn from(literal: Literal) -> Self {
         Self::Literal(literal)
     }
 }
 
 /// Shortcut for creating a new literal builder node.
-pub fn literal<S>(value: &str) -> ArgumentBuilder<S> {
+pub fn literal<S, R>(value: &str) -> ArgumentBuilder<S, R> {
     ArgumentBuilder::new(ArgumentBuilderType::Literal(Literal::new(value)))
 }

@@ -9,7 +9,7 @@ use std::{
 
 use azalea_block::BlockState;
 use azalea_client::{
-    PhysicsState, SprintDirection, StartSprintEvent, StartWalkEvent, WalkDirection,
+    ClientMovementState, SprintDirection, StartSprintEvent, StartWalkEvent, WalkDirection,
     inventory::SetSelectedHotbarSlotEvent, mining::StartMiningBlockEvent,
 };
 use azalea_core::position::{BlockPos, Vec3};
@@ -18,7 +18,7 @@ use azalea_registry::builtin::BlockKind;
 use azalea_world::World;
 use bevy_ecs::{entity::Entity, message::MessageWriter, system::Commands, world::EntityWorldMut};
 use parking_lot::RwLock;
-use tracing::debug;
+use tracing::trace;
 
 use super::{
     astar,
@@ -134,7 +134,7 @@ impl ExecuteCtx<'_, '_, '_, '_, '_, '_, '_, '_> {
         self.commands
             .entity(self.entity)
             .queue(move |mut entity: EntityWorldMut<'_>| {
-                if let Some(mut physics_state) = entity.get_mut::<PhysicsState>() {
+                if let Some(mut physics_state) = entity.get_mut::<ClientMovementState>() {
                     physics_state.trying_to_crouch = sneaking;
                 }
             });
@@ -170,7 +170,7 @@ impl ExecuteCtx<'_, '_, '_, '_, '_, '_, '_, '_> {
         }
 
         let best_tool_result = best_tool_in_hotbar_for_block(block_state, &self.menu);
-        debug!("best tool for {block_state:?}: {best_tool_result:?}");
+        trace!("best tool for {block_state:?}: {best_tool_result:?}");
 
         self.commands.trigger(SetSelectedHotbarSlotEvent {
             entity: self.entity,

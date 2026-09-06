@@ -50,7 +50,9 @@ lib.code.blocks.generate_blocks(
     new_ordered_blocks,
     new_burger_data,
 )
-lib.code.shapes.generate_block_shapes(new_pumpkin_blocks_data, new_block_states_report)
+lib.code.shapes.generate_block_shapes(
+    new_pumpkin_blocks_data, new_block_states_report, new_burger_data
+)
 
 print("Getting en_us.json...")
 language = lib.extract.get_en_us_lang(new_version_id)

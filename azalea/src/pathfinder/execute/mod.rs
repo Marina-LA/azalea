@@ -3,7 +3,7 @@ pub mod simulation;
 
 use std::{cmp, time::Duration};
 
-use azalea_block::{BlockState, BlockTrait};
+use azalea_block::BlockState;
 use azalea_client::{
     StartSprintEvent, StartWalkEvent,
     local_player::WorldHolder,
@@ -147,7 +147,7 @@ pub fn check_node_reached(
                 .clone()
                 .into_iter()
                 .enumerate()
-                .take(30)
+                .take(60)
                 .rev()
             {
                 let movement = edge.movement;
@@ -157,7 +157,10 @@ pub fn check_node_reached(
                     position: **position,
                     physics,
                 };
-                let extra_check = if i == executing_path.path.len() - 1 {
+                let extra_check = if i == executing_path.path.len() - 1
+                    // only do the extra check if we don't have a new path immediately queued up
+                    && executing_path.is_empty_queued_path()
+                {
                     // be extra strict about the velocity and centering if we're on the last node so
                     // we don't fall off
 
@@ -166,14 +169,14 @@ pub fn check_node_reached(
 
                     let block_pos_below = get_block_pos_below_that_affects_movement(*position);
 
-                    let block_state_below = {
+                    let block_below = {
                         let world = world.read();
                         world
                             .chunks
                             .get_block_state(block_pos_below)
                             .unwrap_or(BlockState::AIR)
                     };
-                    let block_below: Box<dyn BlockTrait> = block_state_below.into();
+
                     // friction for normal blocks is 0.6, for ice it's 0.98
                     let block_friction = block_below.behavior().friction as f64;
 
@@ -257,7 +260,7 @@ pub fn timeout_movement(
         &WorldName,
         &Inventory,
         Option<&CustomPathfinderState>,
-        Option<&SimulatingPathState>,
+        Option<&mut SimulatingPathState>,
     )>,
     worlds: Res<Worlds>,
 ) {
@@ -274,8 +277,8 @@ pub fn timeout_movement(
     ) in &mut query
     {
         if !executing_path.path.is_empty() {
-            let (start, end) = if let Some(SimulatingPathState::Simulated(simulating_path_state)) =
-                simulating_path_state
+            let (start, end) = if let Some(s) = &simulating_path_state
+                && let SimulatingPathState::Simulated(simulating_path_state) = &**s
             {
                 (simulating_path_state.start, simulating_path_state.target)
             } else {
@@ -302,6 +305,12 @@ pub fn timeout_movement(
                     "pathfinder went too far from path (xz_distance={xz_distance}/{xz_tolerance}, y_distance={y_distance}/{y_tolerance}, line is {start} to {end}, point at {}), trying to patch!",
                     **position
                 );
+
+                if let Some(mut simulating_path_state) = simulating_path_state {
+                    // don't keep executing the simulation
+                    *simulating_path_state = SimulatingPathState::Fail;
+                }
+
                 patch_path_from_timeout(
                     entity,
                     &mut executing_path,
@@ -410,16 +419,22 @@ pub fn recalculate_near_end_of_path(
             continue;
         };
 
-        // start recalculating if the path ends soon
+        // start recalculating if the path ends soon. 50 is arbitrary, that's just to
+        // make us recalculate once when we start nearing the end. this doesn't account
+        // for skipping nodes, though...
+        // TODO: have a variable to store whether we've recalculated, and then check
+        // that `&& path.len() <= 50` to see if we should recalculate.
         if (executing_path.path.len() == 50 || executing_path.path.len() < 5)
             && !pathfinder.is_calculating
             && executing_path.is_path_partial
+            // don't recalculate if we're already planning on switching to a different path
+            && executing_path.queued_path.is_none()
         {
             match pathfinder.goal.as_ref().cloned() {
                 Some(goal) => {
                     debug!("Recalculating path because it's empty or ends soon");
                     debug!(
-                        "recalculate_near_end_of_path executing_path.is_path_partial: {}",
+                        "   executing_path.is_path_partial: {}",
                         executing_path.is_path_partial
                     );
 
@@ -513,7 +528,9 @@ pub fn point_line_distance_1d(point: f64, (start, end): (f64, f64)) -> f64 {
     let max = start.max(end);
     if point < min {
         min - point
-    } else {
+    } else if point > max {
         point - max
+    } else {
+        0.
     }
 }
