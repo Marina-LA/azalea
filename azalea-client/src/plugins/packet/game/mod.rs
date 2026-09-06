@@ -1,4 +1,4 @@
-d events;
+mod events;
 
 use std::{collections::HashSet, sync::Arc};
 
