@@ -37,6 +37,8 @@ use azalea_world::World;
 use bevy_app::{App, Plugin, Update};
 use bevy_ecs::prelude::*;
 
+use tracing::debug;
+
 use crate::{
     local_player::{Hunger, WorldHolder},
     packet::game::SendGamePacketEvent,
@@ -137,6 +139,10 @@ pub fn send_position(
                 (x_delta.powi(2) + y_delta.powi(2) + z_delta.powi(2)) > 2.0e-4f64.powi(2);
             let sending_position = is_delta_large_enough || physics_state.position_remainder >= 20;
             let sending_direction = y_rot_delta != 0.0 || x_rot_delta != 0.0;
+
+            if sending_position {
+                debug!("SEND_POS entity={entity:?} position={} last_sent={} on_ground={}", **position, **last_sent_position, physics.on_ground());
+            }
 
             // if self.is_passenger() {
             //   TODO: posrot packet for being a passenger

@@ -26,7 +26,7 @@ pub use blocks::BlockWithShape;
 pub use discrete_voxel_shape::*;
 use entity_collisions::{CollidableEntityQuery, get_entity_collisions};
 pub use shape::*;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use self::world_collisions::get_block_collisions;
 use crate::{
@@ -172,6 +172,8 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
             }
         };
 
+        debug!("MOVE_COLLIDING position_before={} movement={} new_pos={}", ***position, movement, new_pos);
+
         if new_pos != ***position {
             ***position = new_pos;
         }
@@ -185,6 +187,15 @@ pub fn move_colliding(ctx: &mut MoveCtx, mut movement: Vec3) {
     let vertical_collision = movement.y != collide_result.y;
     physics.vertical_collision = vertical_collision;
     let on_ground = vertical_collision && movement.y < 0.;
+    // Log when gravity was applied but no block was found below —
+    // the root cause that triggers the server-side Y clamp.
+    if movement.y < 0. && !vertical_collision {
+        debug!(
+            position = %***position,
+            movement_y = movement.y,
+            "MISSING_GROUND: gravity applied but no block below detected"
+        );
+    }
     physics.set_on_ground(on_ground);
 
     // TODO: minecraft checks for a "minor" horizontal collision here

@@ -305,6 +305,7 @@ impl GamePacketHandler<'_> {
                     new_world_name,
                 );
                 let entity_id = p.player_id;
+                debug!("LOGIN_INSERT entity={:?} entity_bundle_pos=Vec3::ZERO", self.player);
                 // insert our components into the ecs :)
                 commands.entity(self.player).insert((
                     entity_id,
@@ -429,6 +430,7 @@ impl GamePacketHandler<'_> {
 
             p.relative
                 .apply(&p.change, &mut position, &mut direction, &mut physics);
+            debug!("TELEPORT entity={:?} position_after_apply={}", self.player, **position);
             // old_pos is set to the current position when we're teleported
             physics.set_old_pos(*position);
 
