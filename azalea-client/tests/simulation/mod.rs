@@ -15,6 +15,7 @@ mod mine_block_timing_hand;
 mod mine_block_without_rollback;
 mod move_and_despawn_entity;
 mod move_despawned_entity;
+mod multiple_moves_one_entity;
 mod packet_order;
 mod packet_order_set_carried_item;
 mod receive_spawn_entity_and_start_config_packet;

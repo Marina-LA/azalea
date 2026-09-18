@@ -105,19 +105,28 @@ pub fn read_packets(ecs: &mut World) {
 
     // handle injected packets, see the comment on
     // RawConnection::injected_clientbound_packets for more info
+    // Move-* packets are collected here and batch-applied once at the end,
+    // mirroring the networked path so sim tests exercise the same fast path
+    let mut injected_move_requests: Vec<(Entity, game::MoveEntity)> = Vec::new();
     for (entity, raw_packets) in entities_with_injected_packets {
         for raw_packet in raw_packets {
             let conn = conn_query.get(ecs, entity).unwrap();
             let state = conn.state;
 
             trace!("Received injected packet with bytes: {raw_packet:?}");
-            if let Err(e) =
-                handle_raw_packet(ecs, &raw_packet, entity, state, &mut queued_packet_events)
-            {
+            if let Err(e) = handle_raw_packet(
+                ecs,
+                &raw_packet,
+                entity,
+                state,
+                &mut queued_packet_events,
+                &mut injected_move_requests,
+            ) {
                 error!("Error reading injected packet: {e}");
             }
         }
     }
+    game::apply_move_requests(ecs, &injected_move_requests);
 
     // Read and process packets from all entities.
     // Login/Config packets are processed inline (sequential) to handle protocol
@@ -166,6 +175,7 @@ pub fn read_packets(ecs: &mut World) {
                                 *entity,
                                 state,
                                 &mut queued_packet_events,
+                                &mut Vec::new(),
                             ) {
                                 error!("Error reading packet: {e}");
                             }
@@ -238,12 +248,27 @@ pub fn read_packets(ecs: &mut World) {
 
     let mut skipped_packets = 0;
     let mut proc_slow_packets = 0u32;
+    // Move-* packets are collected here and batch-applied once at the end of
+    // the cycle (Stage 9.0 fast path); per-bot order is unchanged because the
+    // deserialized Vec is already read order.
+    let mut move_requests: Vec<(Entity, game::MoveEntity)> = Vec::new();
     for (entity, result) in deserialized {
         match result {
             Ok(packet) => {
                 // If budget exhausted, skip non-essential packets to defer processing
+                // (the fast-path Move-* packets skip here too, same as before)
                 if budget_exhausted && !is_essential_game_packet(&packet) {
                     skipped_packets += 1;
+                    continue;
+                }
+
+                if let Some(p) = game::move_to_apply(packet.as_ref()) {
+                    #[cfg(feature = "packet-event")]
+                    queued_packet_events.game.push(ReceiveGamePacketEvent {
+                        entity,
+                        packet: Arc::clone(&packet),
+                    });
+                    move_requests.push((entity, p));
                     continue;
                 }
 
@@ -261,6 +286,7 @@ pub fn read_packets(ecs: &mut World) {
                     proc_slow_packets += 1;
                 }
 
+                #[cfg(feature = "packet-event")]
                 queued_packet_events
                     .game
                     .push(ReceiveGamePacketEvent { entity, packet });
@@ -270,6 +296,7 @@ pub fn read_packets(ecs: &mut World) {
             }
         }
     }
+    game::apply_move_requests(ecs, &move_requests);
     let proc_elapsed = processing_start.elapsed();
 
     let total_processed = game_raw_packets.len() - skipped_packets as usize;
@@ -391,6 +418,7 @@ impl QueuedPacketEvents {
     fn write_messages(&mut self, ecs: &mut World) {
         ecs.write_message_batch(self.login.drain(..));
         ecs.write_message_batch(self.config.drain(..));
+        #[cfg(feature = "packet-event")]
         ecs.write_message_batch(self.game.drain(..));
     }
 }
@@ -495,12 +523,17 @@ impl RawConnection {
     }
 }
 
-pub fn handle_raw_packet(
+// ponytail: was pub; MoveEntity in the signature is pub(crate), and there are
+// no external callers
+pub(crate) fn handle_raw_packet(
     ecs: &mut World,
     raw_packet: &[u8],
     entity: Entity,
     state: ConnectionProtocol,
     queued_packet_events: &mut QueuedPacketEvents,
+    // Move-* packets collected here for batch application (empty for
+    // non-Game-state reads where the Game arm is unreachable)
+    move_requests: &mut Vec<(Entity, game::MoveEntity)>,
 ) -> Result<(), Box<ReadPacketError>> {
     let stream = &mut Cursor::new(raw_packet);
     match state {
@@ -520,7 +553,11 @@ pub fn handle_raw_packet(
                 );
             }
             trace!("Packet: {packet:?}");
-            game::process_packet(ecs, entity, packet.as_ref());
+            if let Some(p) = game::move_to_apply(packet.as_ref()) {
+                move_requests.push((entity, p));
+            } else {
+                game::process_packet(ecs, entity, packet.as_ref());
+            }
             queued_packet_events
                 .game
                 .push(ReceiveGamePacketEvent { entity, packet });

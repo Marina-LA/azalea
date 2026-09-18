@@ -1,6 +1,6 @@
 mod events;
 
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::{HashMap, HashSet}, sync::Arc};
 
 use azalea_core::{
     delta::PositionDelta8,
@@ -750,6 +750,7 @@ impl GamePacketHandler<'_> {
                 &mut world_holder.partial.write(),
                 entity,
                 entity_update_query,
+                None,
             ) {
                 commands.trigger(KnockbackEvent { entity, data });
             }
@@ -1093,6 +1094,7 @@ impl GamePacketHandler<'_> {
                 &mut world_holder.partial.write(),
                 entity,
                 entity_update_query,
+                None,
             ) {
                 return;
             }
@@ -1334,6 +1336,7 @@ impl GamePacketHandler<'_> {
                 &mut world_holder.partial.write(),
                 entity,
                 entity_update_query,
+                None,
             ) {
                 return;
             }
@@ -1515,6 +1518,7 @@ impl GamePacketHandler<'_> {
                     &mut world_holder.partial.write(),
                     entity,
                     entity_update_query,
+                    None,
                 ) {
                     return;
                 }
@@ -1654,7 +1658,7 @@ impl GamePacketHandler<'_> {
     }
 }
 
-struct MoveEntity {
+pub(crate) struct MoveEntity {
     pub entity_id: MinecraftEntityId,
     pub delta: Option<PositionDelta8>,
     pub look_direction: Option<CompactLookDirection>,
@@ -1664,6 +1668,64 @@ struct MoveEntity {
 type MoveEntityQuery<'world, 'state, 'a> =
     Query<'world, 'state, (&'a mut Physics, &'a mut Position, &'a mut LookDirection)>;
 
+/// Returns the equivalent [`MoveEntity`] for packets routed through the
+/// fast path (Move-* only). `None` for anything else.
+pub(crate) fn move_to_apply(packet: &ClientboundGamePacket) -> Option<MoveEntity> {
+    match packet {
+        ClientboundGamePacket::MoveEntityPos(p) => Some(MoveEntity {
+            entity_id: p.entity_id,
+            delta: Some(p.delta),
+            look_direction: None,
+            on_ground: p.on_ground,
+        }),
+        ClientboundGamePacket::MoveEntityPosRot(p) => Some(MoveEntity {
+            entity_id: p.entity_id,
+            delta: Some(p.delta),
+            look_direction: Some(p.look_direction),
+            on_ground: p.on_ground,
+        }),
+        ClientboundGamePacket::MoveEntityRot(p) => Some(MoveEntity {
+            entity_id: p.entity_id,
+            delta: None,
+            look_direction: Some(p.look_direction),
+            on_ground: p.on_ground,
+        }),
+        _ => None,
+    }
+}
+
+/// Applies a batch of collected Move-* requests in one hoisted query pass,
+/// mirroring `move_entity` semantics (see `move_entity_core`). Requests must
+/// be in read order; per-bot sequence is preserved by construction.
+pub(crate) fn apply_move_requests(ecs: &mut World, requests: &[(Entity, MoveEntity)]) {
+    as_system::<(
+        Commands,
+        Query<(&EntityIdIndex, &WorldHolder)>,
+        MoveEntityQuery,
+        EntityUpdateQuery,
+    )>(
+        ecs,
+        |(mut commands, player_query, mut entity_query, entity_update_query)| {
+            // ponytail: per-entity in-batch counter; the Queued ... insert for
+            // UpdatesReceived only materializes at the as_system exit, so
+            // should_apply would otherwise compare against a stale component
+            // and drop same-entity moves.
+            let mut batch_updates: HashMap<Entity, u32> = HashMap::new();
+            for (entity, p) in requests {
+                move_entity_core(
+                    *entity,
+                    &mut commands,
+                    p,
+                    &player_query,
+                    &mut entity_query,
+                    &entity_update_query,
+                    Some(&mut batch_updates),
+                );
+            }
+        },
+    );
+}
+
 fn move_entity(
     player_entity: Entity,
     mut commands: Commands,
@@ -1671,6 +1733,26 @@ fn move_entity(
     player_query: Query<(&EntityIdIndex, &WorldHolder)>,
     mut entity_query: MoveEntityQuery,
     entity_update_query: EntityUpdateQuery,
+) {
+    move_entity_core(
+        player_entity,
+        &mut commands,
+        &p,
+        &player_query,
+        &mut entity_query,
+        &entity_update_query,
+        None,
+    );
+}
+
+fn move_entity_core(
+    player_entity: Entity,
+    commands: &mut Commands,
+    p: &MoveEntity,
+    player_query: &Query<(&EntityIdIndex, &WorldHolder)>,
+    entity_query: &mut MoveEntityQuery,
+    entity_update_query: &EntityUpdateQuery,
+    batch_updates: Option<&mut HashMap<Entity, u32>>,
 ) {
     let (entity_id_index, world_holder) = player_query.get(player_entity).unwrap();
 
@@ -1689,10 +1771,12 @@ fn move_entity(
     };
 
     if !should_apply_entity_update(
-        &mut commands,
+        commands,
         &mut world_holder.partial.write(),
         entity,
-        entity_update_query,
+        // ponytail: EntityUpdateQuery is Copy (a few refs); copy per request is free
+        *entity_update_query,
+        batch_updates,
     ) {
         return;
     }

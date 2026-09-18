@@ -15,7 +15,7 @@
 //   "updates received" if not, then we simply increment our local "updates
 //   received" and do nothing else
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use azalea_core::entity_id::MinecraftEntityId;
 use azalea_entity::LocalEntity;
@@ -84,6 +84,10 @@ pub fn should_apply_entity_update(
     partial_world: &mut PartialWorld,
     entity: Entity,
     entity_update_query: EntityUpdateQuery,
+    // ponytail: per-entity in-batch tracking; None on the per-packet path where
+    // Commands flush per packet so the component is never stale. Upgrade path:
+    // none needed, this is the cheap one.
+    batch_updates: Option<&mut HashMap<Entity, u32>>,
 ) -> bool {
     let partial_entity_infos = &mut partial_world.entity_infos;
 
@@ -105,13 +109,21 @@ pub fn should_apply_entity_update(
         return false;
     }
 
+
     let this_client_updates_received = partial_entity_infos
         .updates_received
         .get(minecraft_entity_id)
         .copied();
 
-    let can_update = if let Some(updates_received) = updates_received {
-        this_client_updates_received.unwrap_or(1) == **updates_received
+    // the component read here may be stale inside a batch (its insert only
+    // materializes at the as_system exit), so the in-batch counter wins.
+    let this_entity_updates_received = batch_updates
+        .as_ref()
+        .and_then(|queued| queued.get(&entity).copied())
+        .or(updates_received.map(|u| **u));
+
+    let can_update = if let Some(this_entity_updates_received) = this_entity_updates_received {
+        this_client_updates_received.unwrap_or(1) == this_entity_updates_received
     } else {
         // no UpdatesReceived means the entity was just spawned
         true
@@ -121,6 +133,11 @@ pub fn should_apply_entity_update(
         partial_entity_infos
             .updates_received
             .insert(*minecraft_entity_id, new_updates_received);
+
+        if let Some(queued) = batch_updates {
+            // record the queued insert so later requests in this batch see it
+            queued.insert(entity, new_updates_received);
+        }
 
         commands
             .entity(entity)
@@ -146,6 +163,7 @@ impl EntityCommand for RelativeEntityUpdate {
                     &mut partial_world.write(),
                     entity,
                     query,
+                    None,
                 );
             });
         });
