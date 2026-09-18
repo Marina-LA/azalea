@@ -1,22 +1,31 @@
 #![allow(clippy::redundant_field_names, reason = "Triggered by `Error` derive")]
 
 use std::{
+    collections::HashMap,
     fmt::Debug,
     io::Cursor,
     mem,
     sync::{
         Arc,
         atomic::{self, AtomicBool},
+        LazyLock,
     },
     time::Instant,
 };
 
+use azalea_buf::AzBufVar as _;
+use azalea_core::{delta::PositionDelta8, entity_id::MinecraftEntityId};
 use azalea_crypto::Aes128CfbEnc;
+use azalea_entity::indexing::EntityIdIndex;
 use azalea_protocol::{
     connect::{RawReadConnection, RawWriteConnection},
     packets::{
         ConnectionProtocol, Packet, ProtocolPacket, config::ClientboundConfigPacket,
-        game::ClientboundGamePacket, login::ClientboundLoginPacket,
+        game::{
+            ClientboundGamePacket, ClientboundMoveEntityPos, ClientboundMoveEntityPosRot,
+            ClientboundMoveEntityRot, c_move_entity_pos_rot::CompactLookDirection,
+        },
+        login::ClientboundLoginPacket,
     },
     read::{ReadPacketError, deserialize_packet},
     write::serialize_packet,
@@ -49,6 +58,9 @@ pub struct PacketProcessingBudget {
     pub max_ms_per_cycle: f64,
     /// Maximum number of packets to process per entity per cycle
     pub max_packets_per_bot: u32,
+    /// Forcibly treat the budget as exhausted (used by packet-order sim tests
+    /// to exercise the exhaustion paths deterministically).
+    pub fake_exhausted: bool,
 }
 
 impl Default for PacketProcessingBudget {
@@ -56,6 +68,7 @@ impl Default for PacketProcessingBudget {
         Self {
             max_ms_per_cycle: 20.0,
             max_packets_per_bot: 50,
+            fake_exhausted: false,
         }
     }
 }
@@ -79,6 +92,10 @@ impl Plugin for ConnectionPlugin {
 
 pub fn read_packets(ecs: &mut World) {
     let start_time = Instant::now();
+    let budget = ecs
+        .get_resource::<PacketProcessingBudget>()
+        .copied()
+        .unwrap_or_default();
     let mut entity_and_conn_query = ecs.query::<(Entity, &mut RawConnection)>();
     let mut conn_query = ecs.query::<&mut RawConnection>();
 
@@ -126,6 +143,11 @@ pub fn read_packets(ecs: &mut World) {
             }
         }
     }
+    // Last-write-wins: when the budget is exhausted keep only the latest Move
+    // per (bot, entity) instead of applying every packet in the burst
+    if budget.fake_exhausted {
+        injected_move_requests = coalesce_latest_moves(injected_move_requests);
+    }
     game::apply_move_requests(ecs, &injected_move_requests);
 
     // Read and process packets from all entities.
@@ -135,11 +157,6 @@ pub fn read_packets(ecs: &mut World) {
     let mut game_raw_packets: Vec<(Entity, Box<[u8]>)> = Vec::new();
     let mut disconnected_entities: Vec<Entity> = Vec::new();
 
-    // Get packet budget and processing state
-    let budget = ecs
-        .get_resource::<PacketProcessingBudget>()
-        .copied()
-        .unwrap_or_default();
     let mut proc_state = ecs
         .remove_resource::<PacketProcessingState>()
         .unwrap_or_default();
@@ -156,6 +173,18 @@ pub fn read_packets(ecs: &mut World) {
     // Read all packets from all entities without budget limits.
     // Budget enforcement happens during processing phase.
     let read_start = Instant::now();
+
+    // per-cycle inputs for the pre-decode movement filter
+    let mut own_id_query = ecs.query::<&MinecraftEntityId>();
+    let mut own_ids: HashMap<Entity, i32> = HashMap::with_capacity(entities_handling_packets.len());
+    for bot in &entities_handling_packets {
+        if let Ok(own) = own_id_query.get(ecs, *bot) {
+            own_ids.insert(*bot, own.0);
+        }
+    }
+    let mut tracked_index_query = ecs.query::<&EntityIdIndex>();
+    let mut predecode_skipped_packets = 0u32;
+
     for entity in &entities_handling_packets {
         loop {
             let mut conn = conn_query.get_mut(ecs, *entity).unwrap();
@@ -182,6 +211,22 @@ pub fn read_packets(ecs: &mut World) {
                         }
                         // Game: collect for rayon parallel deserialization
                         ConnectionProtocol::Game => {
+                            // Pre-decode movement filter: peek packet-id +
+                            // entity-id varints from the clean raw bytes and
+                            // drop Move-* packets for entities this bot
+                            // doesn't track. Equivalent to what budget
+                            // exhaustion does to Move-* anyway (the
+                            // skippable class), so no semantics change.
+                            if let Some(target) = peek_move_id(&raw_packet) {
+                                let is_relevant = own_ids.get(entity).copied() == Some(target.0)
+                                    || tracked_index_query
+                                        .get(ecs, *entity)
+                                        .is_ok_and(|i| i.contains_minecraft_entity(target));
+                                if !is_relevant {
+                                    predecode_skipped_packets += 1;
+                                    continue;
+                                }
+                            }
                             game_raw_packets.push((*entity, raw_packet));
                         }
                         ConnectionProtocol::Handshake | ConnectionProtocol::Status => {
@@ -251,13 +296,25 @@ pub fn read_packets(ecs: &mut World) {
     // Move-* packets are collected here and batch-applied once at the end of
     // the cycle (Stage 9.0 fast path); per-bot order is unchanged because the
     // deserialized Vec is already read order.
+    // When the budget is exhausted, moves instead go into `latest_moves` so
+    // only the LAST Move per (bot, entity) in the burst is applied.
     let mut move_requests: Vec<(Entity, game::MoveEntity)> = Vec::new();
+    let mut latest_moves: HashMap<(Entity, i32), game::MoveEntity> = HashMap::new();
     for (entity, result) in deserialized {
         match result {
             Ok(packet) => {
                 // If budget exhausted, skip non-essential packets to defer processing
-                // (the fast-path Move-* packets skip here too, same as before)
+                // (the fast-path Move-* packets skip here too, same as before),
+                // but keep the latest of those skipped moves per entity.
                 if budget_exhausted && !is_essential_game_packet(&packet) {
+                    if let Some(p) = game::move_to_apply(packet.as_ref()) {
+                        #[cfg(feature = "packet-event")]
+                        queued_packet_events.game.push(ReceiveGamePacketEvent {
+                            entity,
+                            packet: Arc::clone(&packet),
+                        });
+                        latest_moves.insert((entity, p.entity_id.0), p);
+                    }
                     skipped_packets += 1;
                     continue;
                 }
@@ -296,6 +353,11 @@ pub fn read_packets(ecs: &mut World) {
             }
         }
     }
+    move_requests.extend(
+        latest_moves
+            .into_iter()
+            .map(|((entity, _), p)| (entity, p)),
+    );
     game::apply_move_requests(ecs, &move_requests);
     let proc_elapsed = processing_start.elapsed();
 
@@ -331,6 +393,7 @@ pub fn read_packets(ecs: &mut World) {
         total_packets,
         processed_packets = total_processed,
         skipped_packets,
+        predecode_skipped_packets,
         entities_with_packets = entities_handling_packets.len(),
         proc_slow_packets,
         budget_exhausted,
@@ -341,8 +404,69 @@ pub fn read_packets(ecs: &mut World) {
     );
 }
 
+/// Packet ids of the Move-* packet classes, resolved through azalea's own
+/// enum-to-id mapping (`ProtocolPacket::id`) so it can't drift from the
+/// generated `declare_state_packets!` table.
+static MOVE_PACKET_IDS: LazyLock<[u32; 3]> = LazyLock::new(|| {
+    [
+        ClientboundGamePacket::MoveEntityPos(ClientboundMoveEntityPos {
+            entity_id: MinecraftEntityId(0),
+            delta: PositionDelta8::default(),
+            on_ground: false,
+        })
+        .id(),
+        ClientboundGamePacket::MoveEntityPosRot(ClientboundMoveEntityPosRot {
+            entity_id: MinecraftEntityId(0),
+            delta: PositionDelta8::default(),
+            look_direction: CompactLookDirection::default(),
+            on_ground: false,
+        })
+        .id(),
+        ClientboundGamePacket::MoveEntityRot(ClientboundMoveEntityRot {
+            entity_id: MinecraftEntityId(0),
+            look_direction: CompactLookDirection::default(),
+            on_ground: false,
+        })
+        .id(),
+    ]
+});
+
+/// Peeks a raw (already framed/decrypted/decompressed) game packet and returns
+/// `Some(target_id)` for Move-* classes. `None` means "not a Move-* packet" or
+/// "unparseable peek" — the latter falls through to the normal path, which
+/// surfaces the real error on deserialize.
+fn peek_move_id(raw_packet: &[u8]) -> Option<MinecraftEntityId> {
+    let mut stream = Cursor::new(raw_packet);
+    let packet_id = u32::azalea_read_var(&mut stream).ok()?;
+    if MOVE_PACKET_IDS.contains(&packet_id) {
+        i32::azalea_read_var(&mut stream).ok().map(MinecraftEntityId)
+    } else {
+        None
+    }
+}
+
+/// Last-write-wins: keeps only the latest Move per (bot, entity) when the
+/// budget is exhausted, in original read order. Under a join burst this
+/// maintains applied-position freshness regardless of load.
+fn coalesce_latest_moves(
+    moves: Vec<(Entity, game::MoveEntity)>,
+) -> Vec<(Entity, game::MoveEntity)> {
+    let mut latest: HashMap<(Entity, i32), usize> = HashMap::with_capacity(moves.len());
+    for (i, (entity, p)) in moves.iter().enumerate() {
+        latest.insert((*entity, p.entity_id.0), i);
+    }
+    let mut keep = vec![false; moves.len()];
+    for &i in latest.values() {
+        keep[i] = true;
+    }
+    moves
+        .into_iter()
+        .zip(keep)
+        .filter_map(|(m, k)| k.then_some(m))
+        .collect()
+}
+
 /// Returns true for packets that bots must process to stay connected and
-/// navigate. Entity tracking, sounds, particles, UI, and other cosmetic
 /// packets are skipped to keep the tick loop fast.
 fn is_essential_game_packet(packet: &ClientboundGamePacket) -> bool {
     matches!(

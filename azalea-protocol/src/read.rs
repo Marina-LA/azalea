@@ -13,17 +13,26 @@ use std::{
 use azalea_buf::{AzBufVar, BufReadError};
 use azalea_crypto::Aes128CfbDec;
 use flate2::read::ZlibDecoder;
-use futures::StreamExt;
 use futures_lite::future;
 use thiserror::Error;
-use tokio::io::AsyncRead;
-use tokio_util::{
-    bytes::Buf,
-    codec::{BytesCodec, FramedRead},
-};
+use tokio::io::{AsyncRead, AsyncReadExt as _};
+use tokio_util::bytes::Buf;
 use tracing::trace;
 
 use crate::packets::ProtocolPacket;
+
+// ponytail: reused socket-read chunk. Replaces the per-poll FramedRead::new +
+// BytesCodec pair (two allocations per poll); the hot try_read_* path is
+// single-threaded game-loop code, so a thread_local is enough. The to_vec into
+// the returned Box<[u8]> stays: frame data must outlive this scratch and be
+// mutable for in-place decryption.
+thread_local! {
+    static READ_SCRATCH: std::cell::RefCell<Vec<u8>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Size of one bounded socket read, matching FramedRead's default
+/// buffer size so poll behavior is unchanged.
+const READ_BUF_SIZE: usize = 8192;
 
 #[derive(Debug, Error)]
 pub enum ReadPacketError {
@@ -322,16 +331,17 @@ async fn read_and_decrypt_frame<R>(
 where
     R: AsyncRead + Unpin + Send + Sync,
 {
-    let mut framed = FramedRead::new(stream, BytesCodec::new());
-
-    let Some(message) = framed.next().await else {
-        return Err(Box::new(ReadPacketError::ConnectionClosed));
+    // ponytail: fresh scratch per call; this is the await-for-real path, so a
+    // thread_local could be borrowed across await points
+    let mut scratch = Vec::with_capacity(READ_BUF_SIZE);
+    let bytes = match stream.read_buf(&mut scratch).await {
+        Err(e) => return Err(Box::new(ReadPacketError::from(e))),
+        Ok(0) => return Err(Box::new(ReadPacketError::ConnectionClosed)),
+        Ok(_) => scratch,
     };
-    let bytes = message.map_err(ReadPacketError::from)?;
-
-    let mut bytes = bytes.to_vec().into_boxed_slice();
 
     // decrypt if necessary
+    let mut bytes = bytes.into_boxed_slice();
     if let Some(cipher) = cipher {
         azalea_crypto::decrypt_packet(cipher, &mut bytes);
     }
@@ -345,17 +355,23 @@ fn try_read_and_decrypt_frame<R>(
 where
     R: AsyncRead + Unpin + Send + Sync,
 {
-    let mut framed = FramedRead::new(stream, BytesCodec::new());
+    let Some(mut bytes) = READ_SCRATCH.with_borrow_mut(|scratch| {
+        scratch.clear();
+        scratch.reserve(READ_BUF_SIZE); // reads are bounded like BytesCodec's chunk
 
-    let Some(message) = future::block_on(future::poll_once(framed.next())) else {
-        // nothing yet
+        match future::block_on(future::poll_once(stream.read_buf(scratch))) {
+            // nothing yet
+            None => Ok(None),
+            // stream ended
+            Some(Ok(0)) => Err(Box::new(ReadPacketError::ConnectionClosed)),
+            Some(Err(e)) => Err(Box::new(ReadPacketError::from(e))),
+            Some(Ok(_)) => Ok(Some(scratch.to_vec().into_boxed_slice())),
+            // (the to_vec is the single copy in this path; see READ_SCRATCH note)
+        }
+    })?
+    else {
         return Ok(None);
     };
-    let Some(message) = message else {
-        return Err(Box::new(ReadPacketError::ConnectionClosed));
-    };
-    let bytes = message.map_err(ReadPacketError::from)?;
-    let mut bytes = bytes.to_vec().into_boxed_slice();
 
     // decrypt if necessary
     if let Some(cipher) = cipher {

@@ -15,6 +15,7 @@ mod mine_block_timing_hand;
 mod mine_block_without_rollback;
 mod move_and_despawn_entity;
 mod move_despawned_entity;
+mod moves_coalesce_to_latest_under_budget_exhaustion;
 mod multiple_moves_one_entity;
 mod packet_order;
 mod packet_order_set_carried_item;
